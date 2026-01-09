@@ -22,10 +22,16 @@ export default function ChatPage() {
   async function send() {
     if (!input.trim() || loading) return;
 
-    const next = [...messages, { role: "user", content: input }];
+    const userMessage = input;
+    const next = [...messages, { role: "user", content: userMessage }];
+
+    // Update UI immediately
     setMessages(next);
     setInput("");
     setLoading(true);
+
+    // Add an empty assistant message that we will fill as chunks arrive
+    setMessages((m) => [...m, { role: "assistant", content: "" }]);
 
     try {
       const res = await fetch("/api/chat", {
@@ -34,13 +40,45 @@ export default function ChatPage() {
         body: JSON.stringify({ messages: next })
       });
 
-      const data = await res.json();
-      setMessages((m) => [...m, { role: "assistant", content: data.reply || "No reply." }]);
-    } catch {
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content: "Error contacting Cross AI." }
-      ]);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      // IMPORTANT: streaming endpoint returns plain text stream
+      if (!res.body) {
+        throw new Error("No response body");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      let fullText = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        fullText += chunk;
+
+        // Update the last assistant message live
+        setMessages((m) => {
+          const copy = [...m];
+          const lastIndex = copy.length - 1;
+          copy[lastIndex] = { ...copy[lastIndex], content: fullText };
+          return copy;
+        });
+      }
+    } catch (e) {
+      setMessages((m) => {
+        const copy = [...m];
+        const lastIndex = copy.length - 1;
+        copy[lastIndex] = {
+          role: "assistant",
+          content: "Error contacting Cross AI."
+        };
+        return copy;
+      });
     } finally {
       setLoading(false);
     }
@@ -93,3 +131,4 @@ export default function ChatPage() {
     </div>
   );
 }
+
