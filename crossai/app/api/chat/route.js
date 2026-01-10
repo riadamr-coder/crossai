@@ -1,88 +1,69 @@
-import OpenAI from "openai";
-
 export const runtime = "nodejs";
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
 
 const SYSTEM_PROMPT = `
 You are Cross AI, a Bible-focused assistant.
 - Do not invent Bible verses. If unsure, say so.
 - Cite Book Chapter:Verse when referencing Scripture.
-- Keep answers concise by default (around 120–200 words).
+- Keep answers concise by default (120–200 words).
 - This is not therapy. For imminent danger, advise contacting local emergency services.
 `.trim();
 
-function extractTextOrRefusal(response) {
-  // 1) If the SDK provides output_text, use it.
-  if (typeof response?.output_text === "string" && response.output_text.trim()) {
-    return { text: response.output_text.trim(), isRefusal: false };
+function extractTextFromResponsesAPI(responseJson) {
+  // Some responses include output_text; use if present
+  if (typeof responseJson?.output_text === "string" && responseJson.output_text.trim()) {
+    return responseJson.output_text.trim();
   }
 
-  // 2) Otherwise parse the canonical Responses API "output" array
-  const output = response?.output;
-  if (!Array.isArray(output)) return { text: "", isRefusal: false };
+  // Canonical: output[] -> message -> content[] -> output_text
+  const output = responseJson?.output;
+  if (!Array.isArray(output)) return "";
 
-  let textChunks = [];
-  let refusalChunks = [];
-
+  const chunks = [];
   for (const item of output) {
-    // Most common: item.type === "message" and item.content is an array
-    if (Array.isArray(item?.content)) {
+    if (item?.type === "message" && Array.isArray(item.content)) {
       for (const c of item.content) {
-        // Normal text
         if ((c?.type === "output_text" || c?.type === "text") && typeof c.text === "string") {
-          textChunks.push(c.text);
-        }
-        // Refusal text (so you see it instead of blank)
-        if (c?.type === "refusal" && typeof c.refusal === "string") {
-          refusalChunks.push(c.refusal);
+          chunks.push(c.text);
         }
       }
     }
-
-    // Some variants may place text directly on the item
-    if (typeof item?.text === "string") {
-      textChunks.push(item.text);
-    }
   }
-
-  const text = textChunks.join("").trim();
-  if (text) return { text, isRefusal: false };
-
-  const refusal = refusalChunks.join("\n").trim();
-  if (refusal) return { text: refusal, isRefusal: true };
-
-  return { text: "", isRefusal: false };
+  return chunks.join("").trim();
 }
 
 export async function POST(req) {
   try {
     const { messages } = await req.json();
 
-    const response = await client.responses.create({
-      model: "gpt-5-mini",
-      instructions: SYSTEM_PROMPT,
-      input: messages,
-      max_output_tokens: 300,
+    const r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-5-mini",
+        instructions: SYSTEM_PROMPT,
+        input: messages,
+        max_output_tokens: 250,
+      }),
     });
 
-    const { text, isRefusal } = extractTextOrRefusal(response);
+    const json = await r.json().catch(() => null);
 
-    if (!text) {
-      // If nothing was extractable, return a clearer diagnostic message
-      return Response.json({
-        reply:
-          "I received an empty response from the model. Please try again. If this repeats, we likely need to update the OpenAI SDK version in package.json.",
-      });
+    if (!r.ok) {
+      const msg =
+        json?.error?.message ||
+        `OpenAI API error (HTTP ${r.status}).`;
+      return Response.json({ reply: msg }, { status: 500 });
     }
 
-    // If it was a refusal, still show it (so you know what happened)
+    const text = extractTextFromResponsesAPI(json);
+
     return Response.json({
-      reply: isRefusal ? `I can’t help with that request:\n${text}` : text,
+      reply: text || "I received an empty response. Please try again.",
     });
-  } catch (error) {
+  } catch (e) {
     return Response.json(
       { reply: "Server error. Please try again." },
       { status: 500 }
