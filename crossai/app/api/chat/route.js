@@ -1,14 +1,17 @@
 import OpenAI from "openai";
 
 export const runtime = "nodejs";
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 const SYSTEM_PROMPT = `
-You are Cross AI: Bible-focused and supportive.
-- Do not invent verses. If unsure, say so.
-- Cite Book Chapter:Verse when making Scripture claims.
-- Keep answers concise by default.
-- Not therapy; for imminent danger advise local emergency services.
+You are Cross AI, a Bible-focused assistant.
+- Do not invent Bible verses. If unsure, say so.
+- Cite Book Chapter:Verse when referencing Scripture.
+- Keep answers concise by default (around 120–200 words).
+- This is not therapy. For imminent danger, advise contacting local emergency services.
 `.trim();
 
 export async function POST(req) {
@@ -23,7 +26,7 @@ export async function POST(req) {
     });
 
     return Response.json({ reply: response.output_text });
-  } catch (err) {
+  } catch (error) {
     return Response.json(
       { reply: "Server error. Please try again." },
       { status: 500 }
