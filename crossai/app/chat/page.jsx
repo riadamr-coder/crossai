@@ -1,5 +1,6 @@
-export const dynamic = "force-dynamic";
 "use client";
+
+export const dynamic = "force-dynamic";
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -41,8 +42,7 @@ export default function ChatPage() {
 
       if (!res.ok) {
         const msg =
-          data?.reply ||
-          `Server error (${res.status}). Please try again.`;
+          data?.reply || `Server error (${res.status}). Please try again.`;
         setMessages((m) => [...m, { role: "assistant", content: msg }]);
         return;
       }
@@ -53,7 +53,7 @@ export default function ChatPage() {
           : "No reply received. Please try again.";
 
       setMessages((m) => [...m, { role: "assistant", content: replyText }]);
-    } catch (e) {
+    } catch {
       setMessages((m) => [
         ...m,
         { role: "assistant", content: "Network error. Please try again." }
