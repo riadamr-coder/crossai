@@ -22,16 +22,13 @@ export default function ChatPage() {
   async function send() {
     if (!input.trim() || loading) return;
 
-    const userMessage = input;
+    const userMessage = input.trim();
     const next = [...messages, { role: "user", content: userMessage }];
 
     // Update UI immediately
     setMessages(next);
     setInput("");
     setLoading(true);
-
-    // Add an empty assistant message that we will fill as chunks arrive
-    setMessages((m) => [...m, { role: "assistant", content: "" }]);
 
     try {
       const res = await fetch("/api/chat", {
@@ -40,45 +37,27 @@ export default function ChatPage() {
         body: JSON.stringify({ messages: next })
       });
 
+      const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+        const msg =
+          data?.reply ||
+          `Server error (${res.status}). Please try again.`;
+        setMessages((m) => [...m, { role: "assistant", content: msg }]);
+        return;
       }
 
-      // IMPORTANT: streaming endpoint returns plain text stream
-      if (!res.body) {
-        throw new Error("No response body");
-      }
+      const replyText =
+        typeof data?.reply === "string" && data.reply.trim()
+          ? data.reply
+          : "No reply received. Please try again.";
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-
-      let fullText = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        fullText += chunk;
-
-        // Update the last assistant message live
-        setMessages((m) => {
-          const copy = [...m];
-          const lastIndex = copy.length - 1;
-          copy[lastIndex] = { ...copy[lastIndex], content: fullText };
-          return copy;
-        });
-      }
+      setMessages((m) => [...m, { role: "assistant", content: replyText }]);
     } catch (e) {
-      setMessages((m) => {
-        const copy = [...m];
-        const lastIndex = copy.length - 1;
-        copy[lastIndex] = {
-          role: "assistant",
-          content: "Error contacting Cross AI."
-        };
-        return copy;
-      });
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content: "Network error. Please try again." }
+      ]);
     } finally {
       setLoading(false);
     }
@@ -96,8 +75,8 @@ export default function ChatPage() {
       </header>
 
       <div className="card small" style={{ marginBottom: 12 }}>
-        Cross AI is not a licensed therapist and is not a substitute for professional care. If you are in immediate danger,
-        contact your local emergency number.
+        Cross AI is not a licensed therapist and is not a substitute for professional care.
+        If you are in immediate danger, contact your local emergency number.
       </div>
 
       <div
@@ -131,4 +110,3 @@ export default function ChatPage() {
     </div>
   );
 }
-
