@@ -14,27 +14,47 @@ You are Cross AI, a Bible-focused assistant.
 - This is not therapy. For imminent danger, advise contacting local emergency services.
 `.trim();
 
-function extractOutputText(response) {
-  // Newer SDKs may provide response.output_text; keep it if available.
+function extractTextOrRefusal(response) {
+  // 1) If the SDK provides output_text, use it.
   if (typeof response?.output_text === "string" && response.output_text.trim()) {
-    return response.output_text;
+    return { text: response.output_text.trim(), isRefusal: false };
   }
 
-  // Otherwise, extract from the output array (Responses API canonical format).
+  // 2) Otherwise parse the canonical Responses API "output" array
   const output = response?.output;
-  if (!Array.isArray(output)) return "";
+  if (!Array.isArray(output)) return { text: "", isRefusal: false };
 
-  const chunks = [];
+  let textChunks = [];
+  let refusalChunks = [];
+
   for (const item of output) {
-    if (item?.type === "message" && Array.isArray(item.content)) {
+    // Most common: item.type === "message" and item.content is an array
+    if (Array.isArray(item?.content)) {
       for (const c of item.content) {
-        if (c?.type === "output_text" && typeof c.text === "string") {
-          chunks.push(c.text);
+        // Normal text
+        if ((c?.type === "output_text" || c?.type === "text") && typeof c.text === "string") {
+          textChunks.push(c.text);
+        }
+        // Refusal text (so you see it instead of blank)
+        if (c?.type === "refusal" && typeof c.refusal === "string") {
+          refusalChunks.push(c.refusal);
         }
       }
     }
+
+    // Some variants may place text directly on the item
+    if (typeof item?.text === "string") {
+      textChunks.push(item.text);
+    }
   }
-  return chunks.join("").trim();
+
+  const text = textChunks.join("").trim();
+  if (text) return { text, isRefusal: false };
+
+  const refusal = refusalChunks.join("\n").trim();
+  if (refusal) return { text: refusal, isRefusal: true };
+
+  return { text: "", isRefusal: false };
 }
 
 export async function POST(req) {
@@ -45,13 +65,22 @@ export async function POST(req) {
       model: "gpt-5-mini",
       instructions: SYSTEM_PROMPT,
       input: messages,
-      max_output_tokens: 250,
+      max_output_tokens: 300,
     });
 
-    const text = extractOutputText(response);
+    const { text, isRefusal } = extractTextOrRefusal(response);
 
+    if (!text) {
+      // If nothing was extractable, return a clearer diagnostic message
+      return Response.json({
+        reply:
+          "I received an empty response from the model. Please try again. If this repeats, we likely need to update the OpenAI SDK version in package.json.",
+      });
+    }
+
+    // If it was a refusal, still show it (so you know what happened)
     return Response.json({
-      reply: text || "I couldn’t generate a reply. Please try again.",
+      reply: isRefusal ? `I can’t help with that request:\n${text}` : text,
     });
   } catch (error) {
     return Response.json(
